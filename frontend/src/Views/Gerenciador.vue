@@ -1,20 +1,26 @@
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, computed, watch } from 'vue';
 import api from '../services/api';
 
 const emit = defineEmits(['logout']);
 
-// Estados
+// Estados de dados
 const tasks = ref([]);
 const title = ref('');
 const priority = ref('Média');
 const category = ref('');
 const dueDate = ref('');
+
+// Filtros
 const search = ref('');
 const filterStatus = ref('');
 const filterPriority = ref('');
 
-// Estado de Edição (Armazena o ID da tarefa sendo editada)
+// Controles de Paginação
+const currentPage = ref(1);
+const itemsPerPage = ref(5); // Defina quantas tarefas exibir por página
+
+// Estado de Edição
 const editingTaskId = ref(null);
 
 // Feedback
@@ -41,7 +47,8 @@ const fetchTasks = async () => {
   isFetching.value = true;
   try {
     const response = await api.get('tasks/');
-    tasks.value = response.data;
+    // Se o backend usar paginação nativa do Django, os dados virão em response.data.results
+    tasks.value = Array.isArray(response.data) ? response.data : (response.data.results || []);
   } catch (error) {
     errorMessage.value = handleApiError(error, 'Erro ao carregar a lista de tarefas.');
   } finally {
@@ -49,11 +56,54 @@ const fetchTasks = async () => {
   }
 };
 
-// Mapeamento de prioridades para envio ao Django
+// --- LÓGICA DE FILTRAGEM E PAGINAÇÃO NO FRONTEND ---
+
+const filteredTasks = computed(() => {
+  return tasks.value.filter(task => {
+    const matchesSearch = !search.value || 
+      task.title.toLowerCase().includes(search.value.toLowerCase()) ||
+      (task.category && task.category.toLowerCase().includes(search.value.toLowerCase()));
+
+    const matchesStatus = !filterStatus.value || 
+      (filterStatus.value === 'completed' && task.completed) ||
+      (filterStatus.value === 'pending' && !task.completed);
+
+    const mappedPriority = task.priority ? task.priority.toLowerCase() : '';
+    const selectedPriority = filterPriority.value.toLowerCase();
+    const matchesPriority = !filterPriority.value || mappedPriority.includes(selectedPriority);
+
+    return matchesSearch && matchesStatus && matchesPriority;
+  });
+});
+
+// Reseta para a página 1 se o usuário mudar algum filtro ou busca
+watch([search, filterStatus, filterPriority], () => {
+  currentPage.value = 1;
+});
+
+const totalPages = computed(() => {
+  return Math.ceil(filteredTasks.value.length / itemsPerPage.value) || 1;
+});
+
+const paginatedTasks = computed(() => {
+  const start = (currentPage.value - 1) * itemsPerPage.value;
+  const end = start + itemsPerPage.value;
+  return filteredTasks.value.slice(start, end);
+});
+
+const nextPage = () => {
+  if (currentPage.value < totalPages.value) currentPage.value++;
+};
+
+const prevPage = () => {
+  if (currentPage.value > 1) currentPage.value--;
+};
+
+// --- OPERAÇÕES CRUD ---
+
 const priorityMap = { 'Baixa': 'low', 'Média': 'medium', 'Alta': 'high' };
 const priorityUnmap = { 'low': 'Baixa', 'medium': 'Média', 'high': 'Alta' };
 
-// Criar ou Atualizar Tarefa (Função Híbrida)
 const saveTask = async () => {
   if (!title.value.trim()) return;
 
@@ -70,11 +120,9 @@ const saveTask = async () => {
 
   try {
     if (editingTaskId.value) {
-      // Atualizar Tarefa Existente (PUT)
       await api.put(`tasks/${editingTaskId.value}/`, payload);
       successMessage.value = 'Tarefa atualizada com sucesso!';
     } else {
-      // Criar Nova Tarefa (POST)
       await api.post('tasks/', payload);
       successMessage.value = 'Tarefa criada com sucesso!';
     }
@@ -90,19 +138,15 @@ const saveTask = async () => {
   }
 };
 
-// Preenche os campos do formulário para edição
 const startEdit = (task) => {
   editingTaskId.value = task.id;
   title.value = task.title;
   priority.value = priorityUnmap[task.priority] || task.priority || 'Média';
   category.value = task.category || '';
   dueDate.value = task.due_date || '';
-  
-  // Rola até o formulário suavemente
   window.scrollTo({ top: 0, behavior: 'smooth' });
 };
 
-// Cancela o modo de edição
 const cancelEdit = () => {
   editingTaskId.value = null;
   title.value = '';
@@ -111,7 +155,6 @@ const cancelEdit = () => {
   priority.value = 'Média';
 };
 
-// Deletar Tarefa
 const deleteTask = async (id) => {
   if (!confirm('Tem certeza que deseja remover esta tarefa?')) return;
 
@@ -119,7 +162,6 @@ const deleteTask = async (id) => {
     await api.delete(`tasks/${id}/`);
     successMessage.value = 'Tarefa removida com sucesso!';
     await fetchTasks();
-
     setTimeout(() => { successMessage.value = ''; }, 3000);
   } catch (error) {
     errorMessage.value = handleApiError(error, 'Erro ao excluir a tarefa.');
@@ -167,19 +209,12 @@ onMounted(() => {
         </div>
       </transition>
 
-      <!-- Painel de Formulário (Criação / Edição) -->
+      <!-- Formulário -->
       <section class="card-section">
         <h3>{{ editingTaskId ? 'Editar Tarefa' : 'Nova Tarefa' }}</h3>
         <form @submit.prevent="saveTask" class="task-form">
           <div class="form-grid">
-            <input 
-              v-model="title" 
-              type="text" 
-              placeholder="O que precisa de ser feito? *" 
-              required 
-              :disabled="isCreating"
-              class="input-field"
-            />
+            <input v-model="title" type="text" placeholder="O que precisa de ser feito? *" required :disabled="isCreating" class="input-field" />
             
             <select v-model="priority" :disabled="isCreating" class="input-field">
               <option value="Baixa">Baixa Prioridade</option>
@@ -187,20 +222,8 @@ onMounted(() => {
               <option value="Alta">Alta Prioridade</option>
             </select>
 
-            <input 
-              v-model="category" 
-              type="text" 
-              placeholder="Categoria (ex: Trabalho)" 
-              :disabled="isCreating"
-              class="input-field"
-            />
-
-            <input 
-              v-model="dueDate" 
-              type="date" 
-              :disabled="isCreating"
-              class="input-field"
-            />
+            <input v-model="category" type="text" placeholder="Categoria (ex: Trabalho)" :disabled="isCreating" class="input-field" />
+            <input v-model="dueDate" type="date" :disabled="isCreating" class="input-field" />
           </div>
 
           <div class="form-actions">
@@ -215,7 +238,7 @@ onMounted(() => {
         </form>
       </section>
 
-      <!-- Tabela de Tarefas -->
+      <!-- Tabela de Tarefas com Paginação -->
       <section class="card-section">
         <div class="section-header">
           <h3>Suas Tarefas</h3>
@@ -256,10 +279,10 @@ onMounted(() => {
                   </div>
                 </td>
               </tr>
-              <tr v-else-if="tasks.length === 0">
+              <tr v-else-if="paginatedTasks.length === 0">
                 <td colspan="6" class="state-message">Nenhuma tarefa encontrada.</td>
               </tr>
-              <tr v-else v-for="task in tasks" :key="task.id">
+              <tr v-else v-for="task in paginatedTasks" :key="task.id">
                 <td>
                   <span class="status-badge" :class="task.completed ? 'status-completed' : 'status-pending'">
                     {{ task.completed ? 'Concluída' : 'Pendente' }}
@@ -275,25 +298,12 @@ onMounted(() => {
                 <td>{{ task.due_date || '-' }}</td>
                 <td class="text-right">
                   <div class="action-buttons">
-                    <!-- Botão Editar com Ícone e Tooltip -->
-                    <button 
-                      @click="startEdit(task)" 
-                      class="btn-icon edit" 
-                      title="Editar Tarefa"
-                      aria-label="Editar Tarefa"
-                    >
+                    <button @click="startEdit(task)" class="btn-icon edit" title="Editar Tarefa">
                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="icon-action">
                         <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
                       </svg>
                     </button>
-
-                    <!-- Botão Excluir com Ícone e Tooltip -->
-                    <button 
-                      @click="deleteTask(task.id)" 
-                      class="btn-icon delete" 
-                      title="Remover Tarefa"
-                      aria-label="Remover Tarefa"
-                    >
+                    <button @click="deleteTask(task.id)" class="btn-icon delete" title="Remover Tarefa">
                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="icon-action">
                         <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" />
                       </svg>
@@ -304,13 +314,42 @@ onMounted(() => {
             </tbody>
           </table>
         </div>
+
+        <!-- Controles de Paginação -->
+        <div v-if="filteredTasks.length > 0" class="pagination-footer">
+          <div class="pagination-info">
+            Mostrando <strong>{{ paginatedTasks.length }}</strong> de <strong>{{ filteredTasks.length }}</strong> tarefas
+          </div>
+          
+          <div class="pagination-controls">
+            <button 
+              @click="prevPage" 
+              :disabled="currentPage === 1" 
+              class="btn-pagination"
+              title="Página Anterior"
+            >
+              &laquo; Anterior
+            </button>
+            
+            <span class="page-indicator">Página {{ currentPage }} de {{ totalPages }}</span>
+            
+            <button 
+              @click="nextPage" 
+              :disabled="currentPage === totalPages" 
+              class="btn-pagination"
+              title="Próxima Página"
+            >
+              Próxima &raquo;
+            </button>
+          </div>
+        </div>
       </section>
     </main>
   </div>
 </template>
 
 <style scoped>
-/* Estilos Base mantidos */
+/* Estilos Base */
 .dashboard-container { min-height: 100vh; background-color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; color: #334155; }
 .navbar { background-color: #ffffff; border-bottom: 1px solid #e2e8f0; padding: 1rem 2rem; display: flex; align-items: center; justify-content: space-between; }
 .nav-brand { display: flex; align-items: center; gap: 0.75rem; }
@@ -364,16 +403,23 @@ onMounted(() => {
 .priority-badge.medium, .priority-badge.media { color: #d97706; }
 .priority-badge.low, .priority-badge.baixa { color: #16a34a; }
 
-/* Botões de Ação com Ícones */
+/* Botões de Ação */
 .action-buttons { display: flex; justify-content: flex-end; gap: 0.5rem; }
 .btn-icon { background: transparent; border: none; padding: 0.35rem; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: background-color 0.2s ease; }
 .icon-action { width: 18px; height: 18px; }
-
 .btn-icon.edit { color: #2563eb; }
 .btn-icon.edit:hover { background-color: #eff6ff; }
-
 .btn-icon.delete { color: #dc2626; }
 .btn-icon.delete:hover { background-color: #fef2f2; }
+
+/* --- ESTILOS DA PAGINAÇÃO --- */
+.pagination-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid #e2e8f0; flex-wrap: wrap; gap: 1rem; }
+.pagination-info { font-size: 0.875rem; color: #64748b; }
+.pagination-controls { display: flex; align-items: center; gap: 0.75rem; }
+.page-indicator { font-size: 0.875rem; font-weight: 500; color: #475569; }
+.btn-pagination { padding: 0.4rem 0.85rem; font-size: 0.875rem; font-weight: 500; background-color: #ffffff; border: 1px solid #cbd5e1; color: #334155; border-radius: 6px; cursor: pointer; transition: all 0.2s ease; }
+.btn-pagination:hover:not(:disabled) { background-color: #f1f5f9; color: #0f172a; border-color: #94a3b8; }
+.btn-pagination:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* Animações */
 .fade-enter-active, .fade-leave-active { transition: opacity 0.3s ease; }
