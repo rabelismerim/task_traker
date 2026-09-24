@@ -4,5 +4,5 @@ from .models import Task
 class TaskSerializer(serializers.ModelSerializer):
     class Meta:
         model = Task
-        fields = '__all__'
-        read_only_fields = ('owner',)
+        fields = ['id', 'owner', 'title', 'completed', 'priority', 'due_date', 'category', 'created_at']
+        read_only_fields = ('owner', 'created_at')

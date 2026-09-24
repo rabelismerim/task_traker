@@ -26,6 +26,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework_simplejwt',  # CORREÇÃO: Adicionado para registrar as views/models do JWT
     'corsheaders',
+    'django_filters',
 
     # Local apps
     'tasks',
@@ -41,7 +42,7 @@ REST_FRAMEWORK = {
 }
 
 MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware',  # Deve permanecer no topo
+    'corsheaders.middleware.CorsMiddleware',  
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -49,7 +50,6 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    # CORREÇÃO: Removidas as duplicatas de SecurityMiddleware, SessionMiddleware e CommonMiddleware
 ]
 
 ROOT_URLCONF = 'core.urls'
