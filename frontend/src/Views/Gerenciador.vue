@@ -13,7 +13,7 @@
         </button>
       </div>
 
-      <!-- FORMULÁRIO -->
+      <!-- FORMULÁRIO DE TAREFA -->
       <div class="card form-card">
         <h2 class="card-title">
           {{ isEditing ? 'Editar Tarefa' : 'Nova Tarefa' }}
@@ -69,6 +69,7 @@
           <table class="custom-table">
             <thead>
               <tr>
+                <th style="width: 50px;" class="text-center">DONE</th>
                 <th>STATUS</th>
                 <th>TAREFA</th>
                 <th>PRIORIDADE</th>
@@ -78,16 +79,44 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="task in tasks" :key="task.id">
+              <tr 
+                v-for="task in tasks" 
+                :key="task.id" 
+                :class="{ 'row-completed': isCompleted(task) }"
+              >
+                <!-- CHECKBOX DE CONCLUSÃO -->
+                <td class="text-center">
+                  <input 
+                    type="checkbox" 
+                    :checked="isCompleted(task)"
+                    @change="toggleTaskStatus(task)"
+                    class="task-checkbox"
+                    title="Marcar como concluída/pendente"
+                  />
+                </td>
+
+                <!-- BADGE DE STATUS -->
                 <td>
-                  <span class="badge badge-pending">
-                    {{ task.status || 'Pendente' }}
+                  <span 
+                    class="badge" 
+                    :class="isCompleted(task) ? 'badge-completed' : 'badge-pending'"
+                  >
+                    {{ isCompleted(task) ? 'Concluída' : 'Pendente' }}
                   </span>
                 </td>
-                <td class="font-bold">{{ task.title }}</td>
+
+                <!-- TÍTULO DA TAREFA (COM STRIKETHROUGH) -->
+                <td class="font-bold task-title-cell">
+                  <span :class="{ 'line-through': isCompleted(task) }">
+                    {{ task.title }}
+                  </span>
+                </td>
+
                 <td class="text-priority">{{ task.priority }}</td>
                 <td class="text-muted">{{ task.category || '-' }}</td>
                 <td class="text-muted">{{ task.due_date || '-' }}</td>
+
+                <!-- AÇÕES -->
                 <td class="text-right actions-cell">
                   <button @click="startEdit(task)" class="icon-btn edit-btn" title="Editar">
                     ✏️
@@ -99,7 +128,7 @@
               </tr>
 
               <tr v-if="tasks.length === 0">
-                <td colspan="6" class="empty-state">
+                <td colspan="7" class="empty-state">
                   Nenhuma tarefa encontrada.
                 </td>
               </tr>
@@ -166,6 +195,35 @@ const fetchTasks = async () => {
     tasks.value = response.data.results || response.data
   } catch (error) {
     console.error('Erro ao buscar tarefas:', error)
+  }
+}
+
+// Verifica se a tarefa está concluída
+const isCompleted = (task) => {
+  if (typeof task.status === 'string') {
+    return task.status.toLowerCase() === 'concluída' || task.status.toLowerCase() === 'completed'
+  }
+  return !!task.completed
+}
+
+// Alterna o status via PATCH
+const toggleTaskStatus = async (task) => {
+  const currentlyCompleted = isCompleted(task)
+  const newStatus = currentlyCompleted ? 'Pendente' : 'Concluída'
+
+  // Atualização otimista local para resposta instantânea na UI
+  const previousStatus = task.status
+  task.status = newStatus
+
+  try {
+    await api.patch(`tasks/${task.id}/`, {
+      status: newStatus
+    })
+  } catch (error) {
+    console.error('Erro ao alterar status da tarefa:', error)
+    // Reverte em caso de erro no servidor
+    task.status = previousStatus
+    alert('Não foi possível alterar o status da tarefa.')
   }
 }
 
@@ -368,6 +426,29 @@ onMounted(() => {
   padding: 14px 16px;
   border-bottom: 1px solid #f1f5f9;
   color: #334155;
+  transition: all 0.2s ease;
+}
+
+/* CHECKBOX PERSONALIZADO */
+.task-checkbox {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: #16a34a;
+}
+
+/* ESTILOS DE TAREFA CONCLUÍDA */
+.row-completed {
+  background-color: #f8fafc;
+}
+
+.row-completed td {
+  color: #94a3b8 !important;
+}
+
+.line-through {
+  text-decoration: line-through;
+  color: #94a3b8;
 }
 
 .badge {
@@ -375,6 +456,7 @@ onMounted(() => {
   border-radius: 12px;
   font-size: 0.75rem;
   font-weight: 600;
+  display: inline-block;
 }
 
 .badge-pending {
@@ -382,10 +464,16 @@ onMounted(() => {
   color: #92400e;
 }
 
+.badge-completed {
+  background-color: #dcfce7;
+  color: #15803d;
+}
+
 .font-bold { font-weight: 600; color: #0f172a; }
 .text-priority { color: #d97706; font-weight: 600; }
 .text-muted { color: #64748b; }
 .text-right { text-align: right; }
+.text-center { text-align: center; }
 
 .icon-btn {
   background: none;
