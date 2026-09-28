@@ -61,8 +61,20 @@
 
       <!-- TABELA DE TAREFAS -->
       <div class="card table-card">
-        <div class="table-header">
-          <h2 class="card-title">Suas Tarefas</h2>
+        <div class="table-header-toolbar">
+          <h2 class="card-title" style="margin-bottom: 0;">Suas Tarefas ({{ sortedTasks.length }})</h2>
+
+          <!-- CONTROLE DE ORDENAÇÃO INTELIGENTE -->
+          <div class="sort-controls">
+            <label for="sortSelect" class="sort-label">Ordenar por:</label>
+            <select id="sortSelect" v-model="sortBy" class="form-control sort-select">
+              <option value="dueDateAsc">📅 Vencimento mais próximo</option>
+              <option value="dueDateDesc">📅 Vencimento mais distante</option>
+              <option value="priorityDesc">⚡ Maior Prioridade</option>
+              <option value="priorityAsc">⚡ Menor Prioridade</option>
+              <option value="newest">⏱️ Mais Recentes</option>
+            </select>
+          </div>
         </div>
 
         <div class="table-responsive">
@@ -80,9 +92,12 @@
             </thead>
             <tbody>
               <tr 
-                v-for="task in tasks" 
+                v-for="task in sortedTasks" 
                 :key="task.id" 
-                :class="{ 'row-completed': isCompleted(task) }"
+                :class="{ 
+                  'row-completed': isCompleted(task),
+                  'row-overdue': isOverdue(task)
+                }"
               >
                 <!-- CHECKBOX DE CONCLUSÃO -->
                 <td class="text-center">
@@ -99,9 +114,9 @@
                 <td>
                   <span 
                     class="badge" 
-                    :class="isCompleted(task) ? 'badge-completed' : 'badge-pending'"
+                    :class="isCompleted(task) ? 'badge-completed' : (isOverdue(task) ? 'badge-overdue' : 'badge-pending')"
                   >
-                    {{ isCompleted(task) ? 'Concluída' : 'Pendente' }}
+                    {{ isCompleted(task) ? 'Concluída' : (isOverdue(task) ? 'Atrasada' : 'Pendente') }}
                   </span>
                 </td>
 
@@ -112,9 +127,36 @@
                   </span>
                 </td>
 
-                <td class="text-priority">{{ task.priority }}</td>
+                <!-- PRIORIDADE -->
+                <td>
+                  <span class="priority-tag" :class="'priority-' + (task.priority || 'medium').toLowerCase()">
+                    {{ formatPriority(task.priority) }}
+                  </span>
+                </td>
+
                 <td class="text-muted">{{ task.category || '-' }}</td>
-                <td class="text-muted">{{ task.due_date || '-' }}</td>
+
+                <!-- DATA DE VENCIMENTO E INDICADOR VISUAL -->
+                <td>
+                  <div class="due-date-container">
+                    <span 
+                      :class="{
+                        'text-danger font-bold': isOverdue(task),
+                        'text-muted': !isOverdue(task) && !isCompleted(task),
+                        'line-through': isCompleted(task)
+                      }"
+                    >
+                      {{ formatDate(task.due_date) }}
+                    </span>
+
+                    <span v-if="isOverdue(task)" class="overdue-tag" title="Esta tarefa está com o prazo vencido!">
+                      ⚠️ Vencida
+                    </span>
+                    <span v-else-if="isDueToday(task)" class="today-tag">
+                      📅 Hoje
+                    </span>
+                  </div>
+                </td>
 
                 <!-- AÇÕES -->
                 <td class="text-right actions-cell">
@@ -127,7 +169,7 @@
                 </td>
               </tr>
 
-              <tr v-if="tasks.length === 0">
+              <tr v-if="sortedTasks.length === 0">
                 <td colspan="7" class="empty-state">
                   Nenhuma tarefa encontrada.
                 </td>
@@ -167,7 +209,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '../services/api'
 
@@ -176,6 +218,7 @@ const router = useRouter()
 const tasks = ref([])
 const isEditing = ref(false)
 const editingTaskId = ref(null)
+const sortBy = ref('dueDateAsc') // Padrão: Vencimento mais próximo primeiro
 
 const form = ref({
   title: '',
@@ -206,24 +249,95 @@ const isCompleted = (task) => {
   return !!task.completed
 }
 
+// LÓGICA DE DATA E ATRASO
+const isOverdue = (task) => {
+  if (!task.due_date || isCompleted(task)) return false
+  
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  
+  // Ajuste para evitar deslocamento de fuso horário na data YYYY-MM-DD
+  const [year, month, day] = task.due_date.split('-')
+  const dueDate = new Date(year, month - 1, day)
+  
+  return dueDate < today
+}
+
+const isDueToday = (task) => {
+  if (!task.due_date || isCompleted(task)) return false
+  
+  const today = new Date()
+  const [year, month, day] = task.due_date.split('-')
+  const dueDate = new Date(year, month - 1, day)
+  
+  return today.getFullYear() === dueDate.getFullYear() &&
+         today.getMonth() === dueDate.getMonth() &&
+         today.getDate() === dueDate.getDate()
+}
+
+// COMPUTE ORDENAÇÃO INTELIGENTE
+const sortedTasks = computed(() => {
+  const tasksCopy = [...tasks.value]
+
+  const priorityWeight = { high: 3, medium: 2, low: 1 }
+
+  return tasksCopy.sort((a, b) => {
+    if (sortBy.value === 'dueDateAsc') {
+      if (!a.due_date) return 1
+      if (!b.due_date) return -1
+      return new Date(a.due_date) - new Date(b.due_date)
+    }
+    
+    if (sortBy.value === 'dueDateDesc') {
+      if (!a.due_date) return 1
+      if (!b.due_date) return -1
+      return new Date(b.due_date) - new Date(a.due_date)
+    }
+
+    if (sortBy.value === 'priorityDesc') {
+      const pA = priorityWeight[(a.priority || 'medium').toLowerCase()] || 2
+      const pB = priorityWeight[(b.priority || 'medium').toLowerCase()] || 2
+      return pB - pA
+    }
+
+    if (sortBy.value === 'priorityAsc') {
+      const pA = priorityWeight[(a.priority || 'medium').toLowerCase()] || 2
+      const pB = priorityWeight[(b.priority || 'medium').toLowerCase()] || 2
+      return pA - pB
+    }
+
+    if (sortBy.value === 'newest') {
+      return (b.id || 0) - (a.id || 0)
+    }
+
+    return 0
+  })
+})
+
+const formatDate = (dateString) => {
+  if (!dateString) return '-'
+  const [year, month, day] = dateString.split('-')
+  return `${day}/${month}/${year}`
+}
+
+const formatPriority = (priority) => {
+  const map = { low: 'Baixa', medium: 'Média', high: 'Alta' }
+  return map[(priority || 'medium').toLowerCase()] || priority
+}
+
 // Alterna o status via PATCH
 const toggleTaskStatus = async (task) => {
   const currentlyCompleted = isCompleted(task)
   const newStatus = currentlyCompleted ? 'Pendente' : 'Concluída'
 
-  // Atualização otimista local para resposta instantânea na UI
   const previousStatus = task.status
   task.status = newStatus
 
   try {
-    await api.patch(`tasks/${task.id}/`, {
-      status: newStatus
-    })
+    await api.patch(`tasks/${task.id}/`, { status: newStatus })
   } catch (error) {
-    console.error('Erro ao alterar status da tarefa:', error)
-    // Reverte em caso de erro no servidor
+    console.error('Erro ao alterar status:', error)
     task.status = previousStatus
-    alert('Não foi possível alterar o status da tarefa.')
   }
 }
 
@@ -351,6 +465,34 @@ onMounted(() => {
   margin-bottom: 16px;
 }
 
+/* TOOLBAR E ORDENAÇÃO */
+.table-header-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.sort-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sort-label {
+  font-size: 0.85rem;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.sort-select {
+  width: auto;
+  padding: 6px 12px;
+  font-size: 0.85rem;
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -437,7 +579,11 @@ onMounted(() => {
   accent-color: #16a34a;
 }
 
-/* ESTILOS DE TAREFA CONCLUÍDA */
+/* ESTILOS DE TAREFAS ATRASADAS E CONCLUÍDAS */
+.row-overdue {
+  background-color: #fef2f2;
+}
+
 .row-completed {
   background-color: #f8fafc;
 }
@@ -451,6 +597,7 @@ onMounted(() => {
   color: #94a3b8;
 }
 
+/* BADGES */
 .badge {
   padding: 4px 10px;
   border-radius: 12px;
@@ -469,8 +616,48 @@ onMounted(() => {
   color: #15803d;
 }
 
+.badge-overdue {
+  background-color: #fee2e2;
+  color: #991b1b;
+}
+
+/* PRIORIDADES */
+.priority-tag {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+.priority-high { color: #dc2626; }
+.priority-medium { color: #d97706; }
+.priority-low { color: #16a34a; }
+
+/* DATA E TAGS DE ALERTA */
+.due-date-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.overdue-tag {
+  background-color: #fca5a5;
+  color: #7f1d1d;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.today-tag {
+  background-color: #fed7aa;
+  color: #9a3412;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
 .font-bold { font-weight: 600; color: #0f172a; }
-.text-priority { color: #d97706; font-weight: 600; }
+.text-danger { color: #dc2626; }
 .text-muted { color: #64748b; }
 .text-right { text-align: right; }
 .text-center { text-align: center; }
