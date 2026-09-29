@@ -8,16 +8,18 @@ class Task(models.Model):
         ('high', 'Alta'),
     ]
 
-    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='tasks')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='tasks')
     title = models.CharField(max_length=200)
-    completed = models.BooleanField(default=False)
-    priority = models.CharField(max_length=10, choices=PRIORITY_CHOICES, default='medium')
-    due_date = models.DateField(null=True, blank=True)
     category = models.CharField(max_length=50, blank=True, default='')
+    priority = models.CharField(max_length=10, choices=PRIORITY_CHOICES, default='medium')
+    status = models.CharField(max_length=50, default='Pendente')
+    completed = models.BooleanField(default=False)
+    due_date = models.DateField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ['-created_at']
 
     def __str__(self):
-        return self.title
+        return f"{self.title} - {self.user.username}"
