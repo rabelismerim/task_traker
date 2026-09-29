@@ -111,7 +111,9 @@
       <!-- TABELA DE TAREFAS -->
       <div class="card table-card">
         <div class="table-header-toolbar">
-          <h2 class="card-title" style="margin-bottom: 0;">Suas Tarefas ({{ sortedTasks.length }})</h2>
+          <h2 class="card-title" style="margin-bottom: 0;">
+            Suas Tarefas ({{ totalTasksCount || sortedTasks.length }})
+          </h2>
 
           <!-- CONTROLE DE ORDENAÇÃO INTELIGENTE -->
           <div class="sort-controls">
@@ -226,6 +228,28 @@
             </tbody>
           </table>
         </div>
+
+        <!-- CONTROLE DE PAGINAÇÃO -->
+        <div v-if="totalPages > 1" class="pagination-container">
+          <button 
+            @click="prevPage" 
+            :disabled="currentPage === 1" 
+            class="btn btn-secondary btn-sm"
+          >
+            ◀ Anterior
+          </button>
+
+          <span class="page-info">Página {{ currentPage }} de {{ totalPages }}</span>
+
+          <button 
+            @click="nextPage" 
+            :disabled="currentPage === totalPages" 
+            class="btn btn-secondary btn-sm"
+          >
+            Próxima ▶
+          </button>
+        </div>
+
       </div>
 
     </div>
@@ -269,6 +293,11 @@ const isEditing = ref(false)
 const editingTaskId = ref(null)
 const sortBy = ref('dueDateAsc')
 
+// ESTADOS PARA PAGINAÇÃO
+const currentPage = ref(1)
+const totalPages = ref(1)
+const totalTasksCount = ref(0)
+
 const form = ref({
   title: '',
   priority: 'medium',
@@ -281,12 +310,39 @@ const showSuccessModal = ref(false)
 const successMessage = ref('')
 const taskToDelete = ref(null)
 
-const fetchTasks = async () => {
+// BUSCA COM SUPORTE À PAGINAÇÃO DO DRF
+const fetchTasks = async (page = 1) => {
   try {
-    const response = await api.get('tasks/')
-    tasks.value = response.data.results || response.data
+    const response = await api.get(`tasks/?page=${page}`)
+    
+    // Tratamento para resposta paginada do DRF
+    if (response.data.results) {
+      tasks.value = response.data.results
+      totalTasksCount.value = response.data.count
+      totalPages.value = Math.ceil(response.data.count / 10) // Considera page_size = 10
+      currentPage.value = page
+    } else {
+      // Fallback caso a API retorne um array direto (sem paginação)
+      tasks.value = response.data
+      totalTasksCount.value = response.data.length
+      totalPages.value = 1
+      currentPage.value = 1
+    }
   } catch (error) {
     console.error('Erro ao buscar tarefas:', error)
+  }
+}
+
+// CONTROLES DE NAVEGAÇÃO DA PAGINAÇÃO
+const nextPage = () => {
+  if (currentPage.value < totalPages.value) {
+    fetchTasks(currentPage.value + 1)
+  }
+}
+
+const prevPage = () => {
+  if (currentPage.value > 1) {
+    fetchTasks(currentPage.value - 1)
   }
 }
 
@@ -340,7 +396,7 @@ const stats = computed(() => {
   }
 })
 
-// ORDENAÇÃO INTELIGENTE
+// ORDENAÇÃO INTELIGENTE DA PÁGINA ATUAL
 const sortedTasks = computed(() => {
   const tasksCopy = [...tasks.value]
   const priorityWeight = { high: 3, medium: 2, low: 1 }
@@ -391,16 +447,30 @@ const formatPriority = (priority) => {
 
 const toggleTaskStatus = async (task) => {
   const currentlyCompleted = isCompleted(task)
-  const newStatus = currentlyCompleted ? 'Pendente' : 'Concluída'
+  
+  // Define os novos valores
+  const newCompleted = !currentlyCompleted
+  const newStatus = newCompleted ? 'Concluída' : 'Pendente'
 
+  // Guarda os valores antigos para reverter caso dê erro
   const previousStatus = task.status
+  const previousCompleted = task.completed
+
+  // Atualização otimista na interface (muda na tela imediatamente)
+  task.completed = newCompleted
   task.status = newStatus
 
   try {
-    await api.patch(`tasks/${task.id}/`, { status: newStatus })
+    // Envia a alteração para o backend Django via PATCH
+    await api.patch(`tasks/${task.id}/`, { 
+      status: newStatus,
+      completed: newCompleted 
+    })
   } catch (error) {
-    console.error('Erro ao alterar status:', error)
+    console.error('Erro ao alterar status da tarefa:', error)
+    // Se falhar na API, reverte para o estado anterior
     task.status = previousStatus
+    task.completed = previousCompleted
   }
 }
 
@@ -415,7 +485,7 @@ const handleSubmit = async () => {
     }
     resetForm()
     showSuccessModal.value = true
-    fetchTasks()
+    fetchTasks(currentPage.value)
   } catch (error) {
     console.error('Erro ao salvar tarefa:', error)
   }
@@ -449,7 +519,7 @@ const confirmDelete = async () => {
     showDeleteModal.value = false
     successMessage.value = 'Tarefa removida com sucesso!'
     showSuccessModal.value = true
-    fetchTasks()
+    fetchTasks(currentPage.value)
   } catch (error) {
     console.error('Erro ao excluir tarefa:', error)
   }
