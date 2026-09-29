@@ -13,6 +13,55 @@
         </button>
       </div>
 
+      <!-- DASHBOARD / RESUMO DE ESTATÍSTICAS -->
+      <div class="dashboard-grid">
+        <div class="stat-card">
+          <div class="stat-icon icon-total">📊</div>
+          <div class="stat-info">
+            <span class="stat-value">{{ stats.total }}</span>
+            <span class="stat-label">Total de Tarefas</span>
+          </div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-icon icon-completed">✅</div>
+          <div class="stat-info">
+            <span class="stat-value">{{ stats.completed }}</span>
+            <span class="stat-label">Concluídas</span>
+          </div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-icon icon-pending">⏳</div>
+          <div class="stat-info">
+            <span class="stat-value">{{ stats.pending }}</span>
+            <span class="stat-label">Pendentes</span>
+          </div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-icon icon-overdue">⚠️</div>
+          <div class="stat-info">
+            <span class="stat-value text-danger">{{ stats.overdue }}</span>
+            <span class="stat-label">Atrasadas</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- BARRA DE PROGRESSO -->
+      <div class="card progress-card">
+        <div class="progress-header">
+          <span class="progress-title">Progresso Geral</span>
+          <span class="progress-percentage">{{ stats.progressPercentage }}% Concluído</span>
+        </div>
+        <div class="progress-bar-container">
+          <div 
+            class="progress-bar-fill" 
+            :style="{ width: stats.progressPercentage + '%' }"
+          ></div>
+        </div>
+      </div>
+
       <!-- FORMULÁRIO DE TAREFA -->
       <div class="card form-card">
         <h2 class="card-title">
@@ -120,7 +169,7 @@
                   </span>
                 </td>
 
-                <!-- TÍTULO DA TAREFA (COM STRIKETHROUGH) -->
+                <!-- TÍTULO DA TAREFA -->
                 <td class="font-bold task-title-cell">
                   <span :class="{ 'line-through': isCompleted(task) }">
                     {{ task.title }}
@@ -218,7 +267,7 @@ const router = useRouter()
 const tasks = ref([])
 const isEditing = ref(false)
 const editingTaskId = ref(null)
-const sortBy = ref('dueDateAsc') // Padrão: Vencimento mais próximo primeiro
+const sortBy = ref('dueDateAsc')
 
 const form = ref({
   title: '',
@@ -241,7 +290,7 @@ const fetchTasks = async () => {
   }
 }
 
-// Verifica se a tarefa está concluída
+// LÓGICA DE STATUS E DATAS
 const isCompleted = (task) => {
   if (typeof task.status === 'string') {
     return task.status.toLowerCase() === 'concluída' || task.status.toLowerCase() === 'completed'
@@ -249,14 +298,12 @@ const isCompleted = (task) => {
   return !!task.completed
 }
 
-// LÓGICA DE DATA E ATRASO
 const isOverdue = (task) => {
   if (!task.due_date || isCompleted(task)) return false
   
   const today = new Date()
   today.setHours(0, 0, 0, 0)
   
-  // Ajuste para evitar deslocamento de fuso horário na data YYYY-MM-DD
   const [year, month, day] = task.due_date.split('-')
   const dueDate = new Date(year, month - 1, day)
   
@@ -275,10 +322,27 @@ const isDueToday = (task) => {
          today.getDate() === dueDate.getDate()
 }
 
-// COMPUTE ORDENAÇÃO INTELIGENTE
+// CÁLCULO DE ESTATÍSTICAS E DASHBOARD
+const stats = computed(() => {
+  const total = tasks.value.length
+  const completed = tasks.value.filter(task => isCompleted(task)).length
+  const overdue = tasks.value.filter(task => isOverdue(task)).length
+  const pending = total - completed
+
+  const progressPercentage = total > 0 ? Math.round((completed / total) * 100) : 0
+
+  return {
+    total,
+    completed,
+    pending,
+    overdue,
+    progressPercentage
+  }
+})
+
+// ORDENAÇÃO INTELIGENTE
 const sortedTasks = computed(() => {
   const tasksCopy = [...tasks.value]
-
   const priorityWeight = { high: 3, medium: 2, low: 1 }
 
   return tasksCopy.sort((a, b) => {
@@ -325,7 +389,6 @@ const formatPriority = (priority) => {
   return map[(priority || 'medium').toLowerCase()] || priority
 }
 
-// Alterna o status via PATCH
 const toggleTaskStatus = async (task) => {
   const currentlyCompleted = isCompleted(task)
   const newStatus = currentlyCompleted ? 'Pendente' : 'Concluída'
@@ -457,6 +520,96 @@ onMounted(() => {
   margin: 0;
 }
 
+/* DASHBOARD E CARTÕES */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+.stat-card {
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  border: 1px solid #eef2f6;
+}
+
+.stat-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.3rem;
+}
+
+.icon-total { background-color: #eff6ff; }
+.icon-completed { background-color: #f0fdf4; }
+.icon-pending { background-color: #fefce8; }
+.icon-overdue { background-color: #fef2f2; }
+
+.stat-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.stat-value {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.2;
+}
+
+.stat-label {
+  font-size: 0.8rem;
+  color: #64748b;
+  font-weight: 600;
+}
+
+/* BARRA DE PROGRESSO */
+.progress-card {
+  padding: 16px 20px;
+}
+
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.progress-title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #334155;
+}
+
+.progress-percentage {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #2563eb;
+}
+
+.progress-bar-container {
+  width: 100%;
+  height: 10px;
+  background-color: #e2e8f0;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background-color: #2563eb;
+  border-radius: 10px;
+  transition: width 0.4s ease;
+}
+
 .card-title {
   font-size: 1.1rem;
   font-weight: 700;
@@ -571,7 +724,6 @@ onMounted(() => {
   transition: all 0.2s ease;
 }
 
-/* CHECKBOX PERSONALIZADO */
 .task-checkbox {
   width: 18px;
   height: 18px;
@@ -579,7 +731,6 @@ onMounted(() => {
   accent-color: #16a34a;
 }
 
-/* ESTILOS DE TAREFAS ATRASADAS E CONCLUÍDAS */
 .row-overdue {
   background-color: #fef2f2;
 }
@@ -597,7 +748,6 @@ onMounted(() => {
   color: #94a3b8;
 }
 
-/* BADGES */
 .badge {
   padding: 4px 10px;
   border-radius: 12px;
@@ -621,7 +771,6 @@ onMounted(() => {
   color: #991b1b;
 }
 
-/* PRIORIDADES */
 .priority-tag {
   font-weight: 600;
   font-size: 0.85rem;
@@ -630,7 +779,6 @@ onMounted(() => {
 .priority-medium { color: #d97706; }
 .priority-low { color: #16a34a; }
 
-/* DATA E TAGS DE ALERTA */
 .due-date-container {
   display: flex;
   align-items: center;
